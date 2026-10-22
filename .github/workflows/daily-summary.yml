@@ -35,30 +35,28 @@ jobs:
         run: cp data/config.github.json data/config.json
 
       - name: Preflight - check required secrets
+        id: preflight
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           HORIZON_WEBHOOK_URL: ${{ secrets.HORIZON_WEBHOOK_URL }}
         run: |
           missing=""
-          [ -z "$DEEPSEEK_API_KEY" ] && missing="$missing DEEPSEEK_API_KEY"
-          [ -z "$HORIZON_WEBHOOK_URL" ] && missing="$missing HORIZON_WEBHOOK_URL"
+          : > preflight.txt
+          for name in DEEPSEEK_API_KEY HORIZON_WEBHOOK_URL; do
+            eval "value=\${$name}"
+            if [ -z "$value" ]; then
+              echo "$name: MISSING" | tee -a preflight.txt
+              echo "::error::$name is not set in repository secrets"
+              missing="$missing $name"
+            else
+              echo "$name: present (${#value} chars)" | tee -a preflight.txt
+            fi
+          done
           if [ -n "$missing" ]; then
-            echo "::error::Missing repository secret(s):$missing"
-            {
-              echo "工作流在运行前检查时发现缺少仓库 Secret:"
-              echo ""
-              for name in $missing; do echo "- \`$name\`"; done
-              echo ""
-              echo "到 Settings → Secrets and variables → Actions 添加后重新运行。"
-            } > preflight.md
-            gh issue create \
-              --repo "${{ github.repository }}" \
-              --title "Horizon 缺少 Secret · $(date -u '+%Y-%m-%d %H:%M UTC')" \
-              --body-file preflight.md || true
+            echo "Preflight failed:$missing"
             exit 1
           fi
-          echo "Required secrets are present."
+          echo "All required secrets are present."
 
       - name: Run Horizon
         id: horizon
@@ -77,7 +75,7 @@ jobs:
           uv run horizon --hours 24 2>&1 | tee horizon-run.log
 
       - name: Report failure as issue
-        if: steps.horizon.outcome == 'failure'
+        if: failure() || steps.horizon.outcome == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -85,10 +83,19 @@ jobs:
             echo "运行时间: $(date -u '+%Y-%m-%d %H:%M UTC')"
             echo "运行链接: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo ""
-            echo "末尾 150 行输出:"
+            echo "| 步骤 | 结果 |"
+            echo "| --- | --- |"
+            echo "| Preflight | ${{ steps.preflight.outcome }} |"
+            echo "| Run Horizon | ${{ steps.horizon.outcome }} |"
             echo ""
+            echo "**Secret 检查结果**"
             echo '```'
-            tail -n 150 horizon-run.log 2>/dev/null || echo "(日志文件不存在)"
+            cat preflight.txt 2>/dev/null || echo "(preflight 未产生输出)"
+            echo '```'
+            echo ""
+            echo "**Horizon 日志尾部**"
+            echo '```'
+            tail -n 150 horizon-run.log 2>/dev/null || echo "(Horizon 未执行，无日志)"
             echo '```'
           } > diagnostic.md
           gh issue create \
