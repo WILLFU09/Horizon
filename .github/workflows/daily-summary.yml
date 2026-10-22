@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Needed to commit changes
+      issues: write    # Needed to file a diagnostic issue on failure
 
     steps:
       - name: Checkout code
@@ -33,7 +34,35 @@ jobs:
       - name: Prepare GitHub Actions config
         run: cp data/config.github.json data/config.json
 
+      - name: Preflight - check required secrets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          HORIZON_WEBHOOK_URL: ${{ secrets.HORIZON_WEBHOOK_URL }}
+        run: |
+          missing=""
+          [ -z "$DEEPSEEK_API_KEY" ] && missing="$missing DEEPSEEK_API_KEY"
+          [ -z "$HORIZON_WEBHOOK_URL" ] && missing="$missing HORIZON_WEBHOOK_URL"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            {
+              echo "工作流在运行前检查时发现缺少仓库 Secret:"
+              echo ""
+              for name in $missing; do echo "- \`$name\`"; done
+              echo ""
+              echo "到 Settings → Secrets and variables → Actions 添加后重新运行。"
+            } > preflight.md
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "Horizon 缺少 Secret · $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --body-file preflight.md || true
+            exit 1
+          fi
+          echo "Required secrets are present."
+
       - name: Run Horizon
+        id: horizon
+        continue-on-error: true
         env:
           # Map secrets to environment variables expected by config.json
           # Modify these based on your data/config.github.json provider settings
@@ -43,7 +72,33 @@ jobs:
           LWN_KEY: ${{ secrets.LWN_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           HORIZON_WEBHOOK_URL: ${{ secrets.HORIZON_WEBHOOK_URL }}
-        run: uv run horizon --hours 24
+        run: |
+          set -o pipefail
+          uv run horizon --hours 24 2>&1 | tee horizon-run.log
+
+      - name: Report failure as issue
+        if: steps.horizon.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "运行时间: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "运行链接: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo ""
+            echo "末尾 150 行输出:"
+            echo ""
+            echo '```'
+            tail -n 150 horizon-run.log 2>/dev/null || echo "(日志文件不存在)"
+            echo '```'
+          } > diagnostic.md
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Horizon 运行失败 · $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --body-file diagnostic.md || true
+
+      - name: Fail job if Horizon failed
+        if: steps.horizon.outcome == 'failure'
+        run: exit 1
 
       - name: Set current date as environment variable
         run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
