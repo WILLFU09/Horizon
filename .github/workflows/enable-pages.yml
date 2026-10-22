@@ -1,0 +1,48 @@
+name: Enable Pages (temporary diagnostic)
+
+on:
+  push:
+    paths:
+      - '.github/workflows/enable-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect and try to enable Pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          echo "=== token permissions ==="
+          gh api rate_limit --jq '.resources.core' 2>&1 | head -5
+
+          echo "=== GET /pages ==="
+          gh api "repos/${{ github.repository }}/pages" 2>&1
+
+          echo "=== POST /pages (create) ==="
+          echo '{"build_type":"legacy","source":{"branch":"gh-pages","path":"/"}}' > body.json
+          out=$(gh api -X POST "repos/${{ github.repository }}/pages" --input body.json 2>&1)
+          rc=$?
+          echo "rc=$rc"
+          echo "$out"
+          if [ $rc -ne 0 ]; then
+            echo "::error title=POST /pages failed::$(echo "$out" | head -3 | tr '\n' ' ')"
+          fi
+
+          echo "=== PUT /pages (update) ==="
+          out2=$(gh api -X PUT "repos/${{ github.repository }}/pages" --input body.json 2>&1)
+          rc2=$?
+          echo "rc=$rc2"
+          echo "$out2"
+          if [ $rc2 -ne 0 ]; then
+            echo "::error title=PUT /pages failed::$(echo "$out2" | head -3 | tr '\n' ' ')"
+          fi
+
+          echo "=== GET /pages again ==="
+          gh api "repos/${{ github.repository }}/pages" 2>&1
