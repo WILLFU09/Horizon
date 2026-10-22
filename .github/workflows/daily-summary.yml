@@ -6,17 +6,12 @@ on:
     # this intentionally runs early to offset the observed schedule delay.
     - cron: '0 23 * * *'
   workflow_dispatch:      # Allow manual trigger
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/daily-summary.yml'
 
 jobs:
   daily-summary:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Needed to commit changes
-      issues: write    # Needed to file a diagnostic issue on failure
 
     steps:
       - name: Checkout code
@@ -78,34 +73,29 @@ jobs:
           set -o pipefail
           uv run horizon --hours 24 2>&1 | tee horizon-run.log
 
-      - name: Report failure as issue
+      - name: Report failure details
         if: failure() || steps.horizon.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           {
-            echo "运行时间: $(date -u '+%Y-%m-%d %H:%M UTC')"
-            echo "运行链接: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "### Run failed"
             echo ""
-            echo "| 步骤 | 结果 |"
+            echo "| Step | Outcome |"
             echo "| --- | --- |"
             echo "| Preflight | ${{ steps.preflight.outcome }} |"
             echo "| Run Horizon | ${{ steps.horizon.outcome }} |"
             echo ""
-            echo "**Secret 检查结果**"
             echo '```'
-            cat preflight.txt 2>/dev/null || echo "(preflight 未产生输出)"
+            cat preflight.txt 2>/dev/null || true
+            tail -n 60 horizon-run.log 2>/dev/null || echo "(no log)"
             echo '```'
-            echo ""
-            echo "**Horizon 日志尾部**"
-            echo '```'
-            tail -n 150 horizon-run.log 2>/dev/null || echo "(Horizon 未执行，无日志)"
-            echo '```'
-          } > diagnostic.md
-          gh issue create \
-            --repo "${{ github.repository }}" \
-            --title "Horizon 运行失败 · $(date -u '+%Y-%m-%d %H:%M UTC')" \
-            --body-file diagnostic.md || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Surface the tail of the log as check-run annotations, which are
+          # readable without authentication via the check-runs API.
+          if [ -f horizon-run.log ]; then
+            tail -n 8 horizon-run.log | while IFS= read -r line; do
+              echo "::error title=Horizon log::$line"
+            done
+          fi
 
       - name: Fail job if Horizon failed
         if: steps.horizon.outcome == 'failure'
