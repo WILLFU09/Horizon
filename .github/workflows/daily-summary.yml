@@ -6,10 +6,6 @@ on:
     # this intentionally runs early to offset the observed schedule delay.
     - cron: '0 23 * * *'
   workflow_dispatch:      # Allow manual trigger
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/daily-summary.yml'
 
 jobs:
   daily-summary:
