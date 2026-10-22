@@ -63,6 +63,12 @@
   "digest": {
     "max_items": 8,
     "category_groups": {
+      "politics": {
+        "limit": 4,
+        "categories": [
+          "politics"
+        ]
+      },
       "tech": {
         "limit": 3,
         "categories": [
@@ -70,20 +76,14 @@
         ]
       },
       "finance": {
-        "limit": 3,
+        "limit": 1,
         "categories": [
           "finance"
-        ]
-      },
-      "politics": {
-        "limit": 2,
-        "categories": [
-          "politics"
         ]
       }
     },
     "default_group": "other",
-    "default_group_limit": 2,
+    "default_group_limit": 1,
     "profile_order": [
       "traffic-radar"
     ]
