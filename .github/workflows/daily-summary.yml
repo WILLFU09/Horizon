@@ -6,12 +6,17 @@ on:
     # this intentionally runs early to offset the observed schedule delay.
     - cron: '0 23 * * *'
   workflow_dispatch:      # Allow manual trigger
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/daily-summary.yml'
 
 jobs:
   daily-summary:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Needed to commit changes
+      pages: write     # Needed to enable/configure GitHub Pages
 
     steps:
       - name: Checkout code
@@ -100,6 +105,20 @@ jobs:
       - name: Fail job if Horizon failed
         if: steps.horizon.outcome == 'failure'
         run: exit 1
+
+      - name: Enable GitHub Pages if needed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" >/dev/null 2>&1; then
+            echo "GitHub Pages already enabled."
+            gh api "repos/${{ github.repository }}/pages" --jq '{url: .html_url, branch: .source.branch, status: .status}'
+          else
+            echo "Enabling GitHub Pages on the gh-pages branch..."
+            gh api -X POST "repos/${{ github.repository }}/pages" \
+              -f "source[branch]=gh-pages" -f "source[path]=/"
+            gh api "repos/${{ github.repository }}/pages" --jq '{url: .html_url, branch: .source.branch, status: .status}'
+          fi
 
       - name: Set current date as environment variable
         run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
